@@ -4,7 +4,7 @@ import numpy as np
 from log_time import get_log_time
 
 # 加载 C++ DLL（如果存在）
-DLL_PATH = os.path.join(os.path.dirname(__file__), "world_generator.dll")
+DLL_PATH = os.path.join(os.path.dirname(__file__), "lib/world_generator.dll")
 
 try:
     _dll = ctypes.CDLL(DLL_PATH)
