@@ -18,3 +18,4 @@ dist/
 *.zip
 *.7z
 resources/
+src/resources/
