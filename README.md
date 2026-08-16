@@ -11,7 +11,7 @@ Flantyle 是一个使用 Python 编写、C++ 扩展加速的体素游戏引擎�
         pip install PyOpenGL PyOpenGL_accelerate Pillow numpy glfw opensimplex
     
 2.  **编译 C++ 动态库（Windows 下使用 MinGW）：**
-    
+
         cd src
         g++ -shared -O2 -std=c++11 -o world_generator.dll world_generator_c.cpp
     
@@ -59,6 +59,13 @@ C++ 导出接口
 *   C++ DLL 加载失败时，程序自动回退到 Python 噪声（较慢），便于调试。
 *   快速迭代时，可在 `flantyle.py` 中临时将 `size` 改为 128 以缩短生成时间。
 *   日志前缀统一由 `get_log_time()` 提供，无需手动格式化。
+
+功能预览
+----
+
+<img width="400" height="300" alt="image" src="https://github.com/user-attachments/assets/1b82ab35-2004-46f4-886b-5257b64c2c44" />
+
+*图为程序生成的地形，包含草地，泥土和岩石分层*
 
 贡献与许可证
 ------
