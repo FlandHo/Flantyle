@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "C:\\Users\\Administrator\\Desktop\\Code\\mingw64\\include",
+                "C:\\Users\\Administrator\\Desktop\\Code\\mingw64\\lib\\gcc\\x86_64-w64-mingw32\\8.1.0\\include",
+                "C:\\Users\\Administrator\\Desktop\\Code\\mingw64\\lib\\gcc\\x86_64-w64-mingw32\\8.1.0\\include\\c++\\tr1",
+                "C:/Users/Administrator/Desktop/Code/mingw64/lib/gcc/x86_64-w64-mingw32/8.1.0/include/c++"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE"
+            ]
+        }
+    ],
+    "version": 4
+}
