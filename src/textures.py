@@ -1,6 +1,5 @@
 # 加载资源文件
 import os
-import time
 from log_time import *
 
 texture_load_done_count = 0
@@ -14,7 +13,7 @@ TEXTURE_NAME_MAP = {
     "error":      "error_texture.png",
 }
 
-resource_path = 'resources/textures'
+resource_path = os.path.join(os.path.dirname(__file__), "resources/textures")
 def textures_listdir(path):
     global texture_load_done_count
     for entry in os.listdir(path):
