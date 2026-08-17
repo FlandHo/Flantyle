@@ -1,7 +1,7 @@
 Flantyle — 开发者文档
 ================
 
-Flantyle 是一个使用 Python 编写、C++ 扩展加速的体素游戏引擎。
+Flantyle 是一个使用 Python、C++ 编写的3D沙盒游戏。
 
 快速开始
 ----
