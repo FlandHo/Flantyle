@@ -40,17 +40,17 @@ class Flantyle(object):
         self.vbo_needs_rebuild = True
         self.block_set = set()
 
-        # ========== 玩家物理参数 ==========
+        # ========== 玩家物理参数（MC风格） ==========
         self.cam_pos = [0.0, 30.0, 0.0]          # 脚底位置
         self.velocity = [0.0, 0.0, 0.0]
         self.cam_yaw = 0.0
         self.cam_pitch = 0.0
         self.player_speed = 8.0
-        self.gravity = -25.0                    # 重力加速度
-        self.jump_speed = 11.0                  # 跳跃初速度
+        self.gravity = -40.0
+        self.jump_speed = 15.0
         self.is_on_ground = False
-        self.player_height = 3.6                # 玩家高度（正常）
-        self.player_width = 0.6                 # 玩家水平宽度
+        self.player_height = 4.0
+        self.player_width = 1.0
 
         self.mouse_sensitivity = 0.005
 
@@ -65,6 +65,7 @@ class Flantyle(object):
         }
         self.window = None
         self._last_cursor_pos = None
+        self.highlight_block = None
 
         self.main()
 
@@ -90,10 +91,8 @@ class Flantyle(object):
             if self.batch_blocks:
                 self.blocks.extend(self.batch_blocks)
                 self.batch_blocks = []
-                # 延迟 VBO 构建，标记需要重建
                 self.vbo_needs_rebuild = True
                 print(f"[{get_log_time()}] [info]: Batch mode OFF, {len(self.blocks)} blocks total")
-                # 构建 block_set 用于碰撞检测
                 self.block_set = {(bx, by, bz) for (bx, by, bz, _) in self.blocks}
             else:
                 print(f"[{get_log_time()}] [info]: Batch mode OFF, no blocks")
@@ -116,7 +115,7 @@ class Flantyle(object):
             self.blocks.append(block)
             self.vbo_needs_rebuild = True
 
-    # -------------------- VBO 构建（优化版） --------------------
+    # -------------------- VBO 构建 --------------------
     def rebuild_vbo(self):
         for tex_id, (vbo_id, _) in self.vbo_groups.items():
             glDeleteBuffers(1, [vbo_id])
@@ -126,7 +125,6 @@ class Flantyle(object):
             print(f"[{get_log_time()}] [info]: No blocks to build VBO")
             return
 
-        # 使用局部变量加速
         verts = self.vertices
         face_uv = self.face_uv
         block_positions = {(bx, by, bz) for (bx, by, bz, _) in self.blocks}
@@ -220,7 +218,7 @@ class Flantyle(object):
             elif action == glfw.RELEASE:
                 self.keys[k] = False
 
-    # ======================== 物理与碰撞（优化版） ========================
+    # ======================== 物理与碰撞（MC风格滑动碰撞） ========================
 
     def get_player_aabb(self, pos):
         """返回玩家碰撞箱 (min, max)"""
@@ -235,17 +233,13 @@ class Flantyle(object):
                 a_min[2] < b_max[2] and a_max[2] > b_min[2])
 
     def is_colliding_with_block(self, pos):
-        """检测玩家在pos位置是否与任何方块碰撞（高效版）"""
+        """检测玩家在pos位置是否与任何方块碰撞（精确AABB检测）"""
         if not self.block_set:
             return False
-        half = self.player_width / 2
-        min_x = pos[0] - half
-        max_x = pos[0] + half
-        min_y = pos[1]
-        max_y = pos[1] + self.player_height
-        min_z = pos[2] - half
-        max_z = pos[2] + half
+        min_x, min_y, min_z = self.get_player_aabb(pos)[0]
+        max_x, max_y, max_z = self.get_player_aabb(pos)[1]
 
+        # 计算AABB覆盖的方块中心坐标范围
         start_x = int(math.floor(min_x - 1))
         end_x = int(math.ceil(max_x + 1))
         start_y = int(math.floor(min_y - 1))
@@ -263,8 +257,8 @@ class Flantyle(object):
                             return True
         return False
 
-    def resolve_collision(self, target_pos):
-        """逐轴移动并处理碰撞"""
+    def resolve_collision_mc(self, target_pos):
+        """Minecraft风格的滑动碰撞（分别检测三个轴）"""
         orig_x, orig_y, orig_z = self.cam_pos
         new_x, new_y, new_z = target_pos
 
@@ -275,6 +269,17 @@ class Flantyle(object):
         else:
             self.velocity[0] = 0
 
+        # Y轴
+        test_pos = [self.cam_pos[0], new_y, self.cam_pos[2]]
+        if not self.is_colliding_with_block(test_pos):
+            self.cam_pos[1] = new_y
+            if self.velocity[1] < 0:
+                self.is_on_ground = False
+        else:
+            if self.velocity[1] < 0:
+                self.is_on_ground = True
+            self.velocity[1] = 0
+
         # Z轴
         test_pos = [self.cam_pos[0], self.cam_pos[1], new_z]
         if not self.is_colliding_with_block(test_pos):
@@ -282,40 +287,13 @@ class Flantyle(object):
         else:
             self.velocity[2] = 0
 
-        # Y轴
-        test_pos = [self.cam_pos[0], new_y, self.cam_pos[2]]
-        if not self.is_colliding_with_block(test_pos):
-            self.cam_pos[1] = new_y
-        else:
-            self.cam_pos[1] = new_y
-            if self.velocity[1] < 0:  # 向下
-                for _ in range(20):
-                    self.cam_pos[1] += 0.01
-                    if not self.is_colliding_with_block(self.cam_pos):
-                        break
-                if self.is_colliding_with_block(self.cam_pos):
-                    self.cam_pos[1] = orig_y
-                else:
-                    self.is_on_ground = True
-                self.velocity[1] = 0
-            else:  # 向上
-                for _ in range(20):
-                    self.cam_pos[1] -= 0.01
-                    if not self.is_colliding_with_block(self.cam_pos):
-                        break
-                if self.is_colliding_with_block(self.cam_pos):
-                    self.cam_pos[1] = orig_y
-                self.velocity[1] = 0
-
     def physics_update(self, dt):
         self.is_on_ground = False
 
-        # 重力
         self.velocity[1] += self.gravity * dt
         if self.velocity[1] < -30:
             self.velocity[1] = -30
 
-        # 水平移动
         forward = [-math.sin(self.cam_yaw), 0, -math.cos(self.cam_yaw)]
         right = [math.cos(self.cam_yaw), 0, -math.sin(self.cam_yaw)]
 
@@ -348,21 +326,18 @@ class Flantyle(object):
             self.cam_pos[2] + self.velocity[2] * dt
         ]
 
-        self.resolve_collision(new_pos)
+        self.resolve_collision_mc(new_pos)
 
-        # 跳跃
         if self.keys.get(b' ', False) and self.is_on_ground:
             self.velocity[1] = self.jump_speed
             self.is_on_ground = False
 
-        # 重生（掉到 y < -10）
         if self.cam_pos[1] < -10:
-            self.cam_pos = [0.0, 60.0, 0.0]  # 提高到安全高度
+            self.cam_pos = [0.0, 60.0, 0.0]
             self.velocity = [0.0, 0.0, 0.0]
-            self.ensure_player_not_stuck()   # 防止卡在方块内
+            self.ensure_player_not_stuck()
 
     def ensure_player_not_stuck(self):
-        """检查玩家是否卡在方块内，若是则向上传送"""
         max_attempts = 200
         attempts = 0
         while self.is_colliding_with_block(self.cam_pos) and attempts < max_attempts:
@@ -373,12 +348,123 @@ class Flantyle(object):
         if attempts > 0:
             print(f"[{get_log_time()}] [info]: Player was stuck, teleported up by {attempts * 0.5:.1f} units")
 
+    # ======================== 射线检测 ========================
+
+    def get_face_direction(self, prev_pos, curr_pos):
+        step = (curr_pos[0] - prev_pos[0], curr_pos[1] - prev_pos[1], curr_pos[2] - prev_pos[2])
+        axis = max(range(3), key=lambda i: abs(step[i]))
+        sign = 1 if step[axis] > 0 else -1
+        faces = {
+            (0, 1): "right",
+            (0, -1): "left",
+            (1, 1): "top",
+            (1, -1): "bottom",
+            (2, 1): "front",
+            (2, -1): "back"
+        }
+        return faces[(axis, sign)]
+
+    def get_target_block(self, max_distance=12.0):
+        dx = -math.sin(self.cam_yaw) * math.cos(self.cam_pitch)
+        dy = math.sin(self.cam_pitch)
+        dz = -math.cos(self.cam_yaw) * math.cos(self.cam_pitch)
+        ray_dir = (dx, dy, dz)
+
+        eye_pos = [self.cam_pos[0], self.cam_pos[1] + self.player_height * 0.9, self.cam_pos[2]]
+        step = 0.05
+        prev_pos = eye_pos.copy()
+        for i in range(int(max_distance / step)):
+            curr_pos = [
+                eye_pos[0] + ray_dir[0] * i * step,
+                eye_pos[1] + ray_dir[1] * i * step,
+                eye_pos[2] + ray_dir[2] * i * step
+            ]
+            bx = round(curr_pos[0] / 2) * 2
+            by = round(curr_pos[1] / 2) * 2
+            bz = round(curr_pos[2] / 2) * 2
+            if (bx, by, bz) in self.block_set:
+                self.highlight_block = (bx, by, bz)
+                face_dir = self.get_face_direction(prev_pos, curr_pos)
+                return (bx, by, bz), face_dir
+            prev_pos = curr_pos
+        self.highlight_block = None
+        return None, None
+
     # ======================== 渲染 ========================
+
+    def draw_highlight_box(self):
+        if self.highlight_block is None:
+            return
+        bx, by, bz = self.highlight_block
+        glDisable(GL_TEXTURE_2D)
+
+        # 启用线平滑，让边框更清晰
+        glEnable(GL_LINE_SMOOTH)
+        glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
+
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+        glLineWidth(6.0)                     # 加粗至约0.5方块像素
+        glColor4f(1.0, 1.0, 1.0, 0.9)        # 白色高亮
+
+        glBegin(GL_QUADS)
+        for face in self.faces:
+            for idx in face:
+                v = self.vertices[idx]
+                glVertex3f(v[0] + bx, v[1] + by, v[2] + bz)
+        glEnd()
+
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
+        glDisable(GL_LINE_SMOOTH)
+        glEnable(GL_TEXTURE_2D)
+
+    def draw_crosshair(self):
+        """MC风格准星（粗线，0.5方块像素）"""
+        width = self.win_width
+        height = self.win_height
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        glOrtho(0, width, 0, height, -1, 1)
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        glDisable(GL_DEPTH_TEST)
+        glDisable(GL_TEXTURE_2D)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glColor4f(1.0, 1.0, 1.0, 0.9)
+
+        cx = width // 2
+        cy = height // 2
+        half_len = 15
+        thickness = 3
+
+        glBegin(GL_QUADS)
+        # 水平条
+        glVertex2f(cx - half_len, cy - thickness/2)
+        glVertex2f(cx + half_len, cy - thickness/2)
+        glVertex2f(cx + half_len, cy + thickness/2)
+        glVertex2f(cx - half_len, cy + thickness/2)
+        # 垂直条
+        glVertex2f(cx - thickness/2, cy - half_len)
+        glVertex2f(cx + thickness/2, cy - half_len)
+        glVertex2f(cx + thickness/2, cy + half_len)
+        glVertex2f(cx - thickness/2, cy + half_len)
+        glEnd()
+
+        glDisable(GL_BLEND)
+        glEnable(GL_DEPTH_TEST)
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+        glPopMatrix()
 
     def draw_frame(self, dt):
         self.physics_update(dt)
 
-        # 首次绘制时构建 VBO（延迟构建）
+        self.get_target_block()
+
         if self.vbo_needs_rebuild:
             self.rebuild_vbo()
 
@@ -386,7 +472,6 @@ class Flantyle(object):
         glEnable(GL_DEPTH_TEST)
         glLoadIdentity()
 
-        # 摄像机位置 = 脚底 + 眼睛高度（约 1.6 单位）
         eye_pos = [self.cam_pos[0], self.cam_pos[1] + self.player_height * 0.9, self.cam_pos[2]]
 
         look_dir = [
@@ -430,6 +515,9 @@ class Flantyle(object):
         glDisableClientState(GL_TEXTURE_COORD_ARRAY)
         glDisableClientState(GL_VERTEX_ARRAY)
         glDisable(GL_TEXTURE_2D)
+
+        self.draw_highlight_box()
+        self.draw_crosshair()
 
         glfw.swap_buffers(self.window)
 
@@ -484,9 +572,8 @@ class Flantyle(object):
         self.block_upload(True)
         import world_generator
         world_generator.world_generator(self.setblocks_append)
-        self.block_upload(False)   # 关闭批量模式，标记需要重建 VBO
+        self.block_upload(False)
 
-        # 修正玩家出生位置
         self.ensure_player_not_stuck()
         print(f"[{get_log_time()}] [world/info]: World generation completed")
 
