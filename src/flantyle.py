@@ -11,7 +11,6 @@ from chunk import Chunk
 
 class Flantyle:
     def __init__(self):
-        # 方块几何数据
         self.vertices = [
             (-1,-1,-1), (1,-1,-1), (1,1,-1), (-1,1,-1),
             (-1,-1,1), (1,-1,1), (1,1,1), (-1,1,1)
@@ -26,7 +25,6 @@ class Flantyle:
         self.chunks = {}
         self.chunk_size = Chunk.CHUNK_SIZE
 
-        # 玩家物理
         self.cam_pos = [0.0, 30.0, 0.0]
         self.velocity = [0.0, 0.0, 0.0]
         self.cam_yaw = 0.0
@@ -39,12 +37,12 @@ class Flantyle:
         self.player_width = 1.0
         self.mouse_sensitivity = 0.005
 
-        # 窗口
         self.win_width = 800
         self.win_height = 600
         self.center_x = self.win_width // 2
         self.center_y = self.win_height // 2
 
+        # 不再需要 keys 初始化，因为轮询会直接读取 glfw
         self.keys = {b'w':False, b'a':False, b's':False, b'd':False, b' ':False, b'q':False}
         self.window = None
         self._last_cursor_pos = None
@@ -62,7 +60,6 @@ class Flantyle:
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, img.tobytes())
         return tex
 
-    # ========== 区块操作 ==========
     def get_chunk(self, cx, cz):
         key = (cx, cz)
         if key not in self.chunks:
@@ -75,17 +72,12 @@ class Flantyle:
         lx = (wx // 2) - cx * self.chunk_size
         ly = wy // 2
         lz = (wz // 2) - cz * self.chunk_size
-        # 边界裁剪（防止越界）
-        if lx < 0: lx = 0
-        elif lx >= self.chunk_size: lx = self.chunk_size - 1
-        if ly < 0: ly = 0
-        elif ly >= Chunk.WORLD_HEIGHT: ly = Chunk.WORLD_HEIGHT - 1
-        if lz < 0: lz = 0
-        elif lz >= self.chunk_size: lz = self.chunk_size - 1
         return cx, cz, lx, ly, lz
 
     def is_block_at(self, wx, wy, wz):
         cx, cz, lx, ly, lz = self.world_to_local(wx, wy, wz)
+        if not (0 <= lx < self.chunk_size and 0 <= ly < Chunk.WORLD_HEIGHT and 0 <= lz < self.chunk_size):
+            return False
         chunk = self.chunks.get((cx, cz))
         return chunk.is_block_at(lx, ly, lz) if chunk else False
 
@@ -116,7 +108,6 @@ class Flantyle:
             return True
         return False
 
-    # ========== 世界生成 ==========
     def generate_world(self, size_in_chunks=8, height_scale=35, seed=42):
         from opensimplex import OpenSimplex
         noise = OpenSimplex(seed)
@@ -146,7 +137,6 @@ class Flantyle:
                 chunk.dirty = True
         print(f"[{get_log_time()}] Generated {total} blocks")
 
-    # ========== 区块VBO重建 ==========
     def rebuild_chunk_vbo(self, chunk):
         for _, (vbo, _) in chunk.vbo_groups.items():
             glDeleteBuffers(1, [vbo])
@@ -195,7 +185,6 @@ class Flantyle:
             chunk.vbo_groups[tex] = (vbo, len(data)//5)
         chunk.dirty = False
 
-    # ========== 渲染 ==========
     def render_chunks(self):
         for chunk in self.chunks.values():
             if chunk.dirty:
@@ -220,7 +209,6 @@ class Flantyle:
         glDisableClientState(GL_VERTEX_ARRAY)
         glDisable(GL_TEXTURE_2D)
 
-    # ========== 回调函数 ==========
     def reshape_callback(self, win, w, h):
         if w == 0 or h == 0:
             w, h = 1, 1
@@ -250,13 +238,10 @@ class Flantyle:
                 self.remove_block(*pos)
 
     def key_callback(self, win, key, scancode, action, mods):
-        km = {glfw.KEY_W:b'w', glfw.KEY_A:b'a', glfw.KEY_S:b's', glfw.KEY_D:b'd',
-              glfw.KEY_SPACE:b' ', glfw.KEY_LEFT_SHIFT:b'lshift'}
-        if key in km:
-            k = km[key]
-            self.keys[k] = (action == glfw.PRESS)
+        # 保留但不再使用，仅用于调试
+        pass
 
-    # ========== 物理与碰撞（核心修复） ==========
+    # ========== 物理与碰撞（最简回退 + 轮询按键） ==========
     def get_player_aabb(self, pos):
         hw = self.player_width / 2
         return ((pos[0]-hw, pos[1], pos[2]-hw), (pos[0]+hw, pos[1]+self.player_height, pos[2]+hw))
@@ -284,25 +269,15 @@ class Flantyle:
         ox, oy, oz = self.cam_pos
         nx, ny, nz = target
 
-        # --- X轴 ---
+        # X轴
         test_pos = (nx, oy, oz)
         if not self.is_colliding_with_block(test_pos):
             self.cam_pos[0] = nx
         else:
-            # 滑移到碰撞边界
-            hw = self.player_width / 2
-            if self.velocity[0] > 0:
-                # 碰撞右侧方块，移动到其左边界 - 玩家半宽
-                block_x = int(math.ceil((ox + hw) / 2)) * 2  # 右侧方块x
-                self.cam_pos[0] = block_x - 1 - hw
-            elif self.velocity[0] < 0:
-                block_x = int(math.floor((ox - hw) / 2)) * 2
-                self.cam_pos[0] = block_x + 1 + hw
-            else:
-                self.cam_pos[0] = ox
+            self.cam_pos[0] = ox
             self.velocity[0] = 0
 
-        # --- Y轴 ---
+        # Y轴
         test_pos = (self.cam_pos[0], ny, oz)
         if not self.is_colliding_with_block(test_pos):
             self.cam_pos[1] = ny
@@ -311,41 +286,46 @@ class Flantyle:
         else:
             if self.velocity[1] < 0:
                 self.is_on_ground = True
-            # 滑移（垂直方向）
-            if self.velocity[1] > 0:
-                block_y = int(math.ceil((oy + self.player_height) / 2)) * 2
-                self.cam_pos[1] = block_y - 1 - self.player_height
-            elif self.velocity[1] < 0:
-                block_y = int(math.floor(oy / 2)) * 2
-                self.cam_pos[1] = block_y + 1
-            else:
-                self.cam_pos[1] = oy
+            self.cam_pos[1] = oy
             self.velocity[1] = 0
 
-        # --- Z轴 ---
+        # Z轴
         test_pos = (self.cam_pos[0], self.cam_pos[1], nz)
         if not self.is_colliding_with_block(test_pos):
             self.cam_pos[2] = nz
         else:
-            hw = self.player_width / 2
-            if self.velocity[2] > 0:
-                block_z = int(math.ceil((oz + hw) / 2)) * 2
-                self.cam_pos[2] = block_z - 1 - hw
-            elif self.velocity[2] < 0:
-                block_z = int(math.floor((oz - hw) / 2)) * 2
-                self.cam_pos[2] = block_z + 1 + hw
-            else:
-                self.cam_pos[2] = oz
+            self.cam_pos[2] = oz
             self.velocity[2] = 0
 
+        # 安全脱离
+        for _ in range(10):
+            if not self.is_colliding_with_block(self.cam_pos):
+                break
+            if self.velocity[0] != 0:
+                self.cam_pos[0] -= 0.001 if self.velocity[0] > 0 else -0.001
+            elif self.velocity[1] != 0:
+                self.cam_pos[1] -= 0.001 if self.velocity[1] > 0 else -0.001
+            elif self.velocity[2] != 0:
+                self.cam_pos[2] -= 0.001 if self.velocity[2] > 0 else -0.001
+            else:
+                self.cam_pos[1] += 0.01
+
     def physics_update(self, dt):
+        # ----- 轮询按键 -----
+        self.keys[b'w'] = glfw.get_key(self.window, glfw.KEY_W) == glfw.PRESS
+        self.keys[b'a'] = glfw.get_key(self.window, glfw.KEY_A) == glfw.PRESS
+        self.keys[b's'] = glfw.get_key(self.window, glfw.KEY_S) == glfw.PRESS
+        self.keys[b'd'] = glfw.get_key(self.window, glfw.KEY_D) == glfw.PRESS
+        self.keys[b' '] = glfw.get_key(self.window, glfw.KEY_SPACE) == glfw.PRESS
+        # 其他按键如 Shift 可同样处理
+        # --------------------
+
         if dt > 0.02:
             dt = 0.02
         if dt < 0.001:
             return
 
         self.is_on_ground = False
-
         self.velocity[1] += self.gravity * dt
         if self.velocity[1] < -30:
             self.velocity[1] = -30
@@ -374,7 +354,6 @@ class Flantyle:
             if abs(self.velocity[0]) < 0.1: self.velocity[0] = 0
             if abs(self.velocity[2]) < 0.1: self.velocity[2] = 0
 
-        # 子步进（增加到8步提高精度）
         steps = 8
         sub_dt = dt / steps
         for _ in range(steps):
@@ -402,7 +381,6 @@ class Flantyle:
         else:
             self.cam_pos = [0.0, 100.0, 0.0]
 
-    # ========== 射线检测 ==========
     def get_face_direction(self, prev, curr):
         step = (curr[0]-prev[0], curr[1]-prev[1], curr[2]-prev[2])
         axis = max(range(3), key=lambda i: abs(step[i]))
@@ -429,7 +407,6 @@ class Flantyle:
         self.highlight_block = None
         return None, None
 
-    # ========== 辅助绘制 ==========
     def draw_highlight_box(self):
         if not self.highlight_block:
             return
@@ -479,7 +456,6 @@ class Flantyle:
         glMatrixMode(GL_MODELVIEW)
         glPopMatrix()
 
-    # ========== 主渲染循环 ==========
     def draw_frame(self, dt):
         self.physics_update(dt)
         self.get_target_block()
@@ -511,7 +487,6 @@ class Flantyle:
         if self.window:
             glfw.destroy_window(self.window)
 
-    # ========== 主入口 ==========
     def main(self):
         if not glfw.init():
             raise RuntimeError("glfw init failed")
@@ -523,7 +498,7 @@ class Flantyle:
         glfw.swap_interval(1)
 
         glfw.set_cursor_pos_callback(self.window, self.mouse_motion_callback)
-        glfw.set_key_callback(self.window, self.key_callback)
+        glfw.set_key_callback(self.window, self.key_callback)   # 保留但不再使用
         glfw.set_mouse_button_callback(self.window, self.mouse_button_callback)
         glfw.set_framebuffer_size_callback(self.window, self.reshape_callback)
 
