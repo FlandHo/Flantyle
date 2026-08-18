@@ -10,8 +10,6 @@ import glfw
 from chunk import Chunk
 
 class Flantyle:
-    """主游戏类，管理窗口、渲染、物理和区块系统"""
-
     def __init__(self):
         # 方块几何数据
         self.vertices = [
@@ -25,7 +23,7 @@ class Flantyle:
         self.face_uv = [[(0,1),(1,1),(1,0),(0,0)]] * 6
 
         self.texture_map = {}
-        self.chunks = {}          # (cx, cz) -> Chunk
+        self.chunks = {}
         self.chunk_size = Chunk.CHUNK_SIZE
 
         # 玩家物理
@@ -55,7 +53,6 @@ class Flantyle:
         self.main()
 
     def load_texture(self, path):
-        """加载纹理图片到OpenGL"""
         img = Image.open(path).convert('RGB')
         w, h = img.size
         tex = glGenTextures(1)
@@ -67,52 +64,60 @@ class Flantyle:
 
     # ========== 区块操作 ==========
     def get_chunk(self, cx, cz):
-        """获取或创建区块"""
         key = (cx, cz)
         if key not in self.chunks:
             self.chunks[key] = Chunk(cx, cz)
         return self.chunks[key]
 
     def world_to_local(self, wx, wy, wz):
-        """将世界坐标转换为区块坐标和局部坐标"""
         cx = wx // (self.chunk_size * 2)
         cz = wz // (self.chunk_size * 2)
         lx = (wx // 2) - cx * self.chunk_size
         ly = wy // 2
         lz = (wz // 2) - cz * self.chunk_size
+        # 边界裁剪（防止越界）
+        if lx < 0: lx = 0
+        elif lx >= self.chunk_size: lx = self.chunk_size - 1
+        if ly < 0: ly = 0
+        elif ly >= Chunk.WORLD_HEIGHT: ly = Chunk.WORLD_HEIGHT - 1
+        if lz < 0: lz = 0
+        elif lz >= self.chunk_size: lz = self.chunk_size - 1
         return cx, cz, lx, ly, lz
 
     def is_block_at(self, wx, wy, wz):
-        """检查世界坐标是否有方块"""
         cx, cz, lx, ly, lz = self.world_to_local(wx, wy, wz)
         chunk = self.chunks.get((cx, cz))
         return chunk.is_block_at(lx, ly, lz) if chunk else False
+
+    def add_neighbor_blocks_to_dirty(self, wx, wy, wz):
+        dirs = [(0,0,2), (0,0,-2), (-2,0,0), (2,0,0), (0,2,0), (0,-2,0)]
+        for dx, dy, dz in dirs:
+            nx, ny, nz = wx + dx, wy + dy, wz + dz
+            if self.is_block_at(nx, ny, nz):
+                cxc, czc, lxc, lyc, lzc = self.world_to_local(nx, ny, nz)
+                chunk = self.chunks.get((cxc, czc))
+                if chunk:
+                    chunk.add_dirty_block(lxc, lyc, lzc)
+                    chunk.dirty = True
 
     def set_block(self, wx, wy, wz, tex_ids):
         cx, cz, lx, ly, lz = self.world_to_local(wx, wy, wz)
         chunk = self.get_chunk(cx, cz)
         chunk.set_block(lx, ly, lz, tex_ids)
         chunk.dirty = True
-        self._mark_neighbor_chunks_dirty(cx, cz)
+        self.add_neighbor_blocks_to_dirty(wx, wy, wz)
 
     def remove_block(self, wx, wy, wz):
         cx, cz, lx, ly, lz = self.world_to_local(wx, wy, wz)
         chunk = self.chunks.get((cx, cz))
         if chunk and chunk.remove_block(lx, ly, lz):
             chunk.dirty = True
-            self._mark_neighbor_chunks_dirty(cx, cz)
+            self.add_neighbor_blocks_to_dirty(wx, wy, wz)
             return True
         return False
 
-    def _mark_neighbor_chunks_dirty(self, cx, cz):
-        for dcx, dcz in [(1,0), (-1,0), (0,1), (0,-1)]:
-            neighbor = self.chunks.get((cx + dcx, cz + dcz))
-            if neighbor:
-                neighbor.dirty = True
-
     # ========== 世界生成 ==========
     def generate_world(self, size_in_chunks=8, height_scale=35, seed=42):
-        """按区块生成地形"""
         from opensimplex import OpenSimplex
         noise = OpenSimplex(seed)
         total = 0
@@ -143,16 +148,20 @@ class Flantyle:
 
     # ========== 区块VBO重建 ==========
     def rebuild_chunk_vbo(self, chunk):
-        """重建单个区块的VBO（只处理暴露面）"""
-        # 清空旧VBO
         for _, (vbo, _) in chunk.vbo_groups.items():
             glDeleteBuffers(1, [vbo])
         chunk.vbo_groups = {}
 
+        blocks_to_rebuild = list(chunk.blocks.items())
+        chunk.dirty_blocks.clear()
+
+        if not blocks_to_rebuild:
+            chunk.dirty = False
+            return
+
         temp = {}
-        for (lx, ly, lz), tex_ids in chunk.blocks.items():
+        for (lx, ly, lz), tex_ids in blocks_to_rebuild:
             wx, wy, wz = chunk.get_world_pos(lx, ly, lz)
-            # 检查6个面是否有邻居
             neighbors = [
                 (wx, wy, wz+2), (wx, wy, wz-2),
                 (wx-2, wy, wz), (wx+2, wy, wz),
@@ -177,7 +186,6 @@ class Flantyle:
                     data.extend([pts[j][0], pts[j][1], pts[j][2], uv[j][0], uv[j][1]])
                 temp.setdefault(tex, []).extend(data)
 
-        # 创建VBO
         for tex, data in temp.items():
             arr = np.array(data, dtype=np.float32)
             vbo = glGenBuffers(1)
@@ -189,8 +197,6 @@ class Flantyle:
 
     # ========== 渲染 ==========
     def render_chunks(self):
-        """渲染所有区块"""
-        # 先重建脏区块
         for chunk in self.chunks.values():
             if chunk.dirty:
                 self.rebuild_chunk_vbo(chunk)
@@ -250,7 +256,7 @@ class Flantyle:
             k = km[key]
             self.keys[k] = (action == glfw.PRESS)
 
-    # ========== 物理与碰撞 ==========
+    # ========== 物理与碰撞（核心修复） ==========
     def get_player_aabb(self, pos):
         hw = self.player_width / 2
         return ((pos[0]-hw, pos[1], pos[2]-hw), (pos[0]+hw, pos[1]+self.player_height, pos[2]+hw))
@@ -278,33 +284,68 @@ class Flantyle:
         ox, oy, oz = self.cam_pos
         nx, ny, nz = target
 
-        # X轴
-        test = (nx, oy, oz)
-        if not self.is_colliding_with_block(test):
+        # --- X轴 ---
+        test_pos = (nx, oy, oz)
+        if not self.is_colliding_with_block(test_pos):
             self.cam_pos[0] = nx
         else:
+            # 滑移到碰撞边界
+            hw = self.player_width / 2
+            if self.velocity[0] > 0:
+                # 碰撞右侧方块，移动到其左边界 - 玩家半宽
+                block_x = int(math.ceil((ox + hw) / 2)) * 2  # 右侧方块x
+                self.cam_pos[0] = block_x - 1 - hw
+            elif self.velocity[0] < 0:
+                block_x = int(math.floor((ox - hw) / 2)) * 2
+                self.cam_pos[0] = block_x + 1 + hw
+            else:
+                self.cam_pos[0] = ox
             self.velocity[0] = 0
 
-        # Y轴
-        test = (self.cam_pos[0], ny, oz)
-        if not self.is_colliding_with_block(test):
+        # --- Y轴 ---
+        test_pos = (self.cam_pos[0], ny, oz)
+        if not self.is_colliding_with_block(test_pos):
             self.cam_pos[1] = ny
             if self.velocity[1] < 0:
                 self.is_on_ground = False
         else:
             if self.velocity[1] < 0:
                 self.is_on_ground = True
+            # 滑移（垂直方向）
+            if self.velocity[1] > 0:
+                block_y = int(math.ceil((oy + self.player_height) / 2)) * 2
+                self.cam_pos[1] = block_y - 1 - self.player_height
+            elif self.velocity[1] < 0:
+                block_y = int(math.floor(oy / 2)) * 2
+                self.cam_pos[1] = block_y + 1
+            else:
+                self.cam_pos[1] = oy
             self.velocity[1] = 0
 
-        # Z轴
-        test = (self.cam_pos[0], self.cam_pos[1], nz)
-        if not self.is_colliding_with_block(test):
+        # --- Z轴 ---
+        test_pos = (self.cam_pos[0], self.cam_pos[1], nz)
+        if not self.is_colliding_with_block(test_pos):
             self.cam_pos[2] = nz
         else:
+            hw = self.player_width / 2
+            if self.velocity[2] > 0:
+                block_z = int(math.ceil((oz + hw) / 2)) * 2
+                self.cam_pos[2] = block_z - 1 - hw
+            elif self.velocity[2] < 0:
+                block_z = int(math.floor((oz - hw) / 2)) * 2
+                self.cam_pos[2] = block_z + 1 + hw
+            else:
+                self.cam_pos[2] = oz
             self.velocity[2] = 0
 
     def physics_update(self, dt):
+        if dt > 0.02:
+            dt = 0.02
+        if dt < 0.001:
+            return
+
         self.is_on_ground = False
+
         self.velocity[1] += self.gravity * dt
         if self.velocity[1] < -30:
             self.velocity[1] = -30
@@ -333,12 +374,16 @@ class Flantyle:
             if abs(self.velocity[0]) < 0.1: self.velocity[0] = 0
             if abs(self.velocity[2]) < 0.1: self.velocity[2] = 0
 
-        new_pos = [
-            self.cam_pos[0] + self.velocity[0] * dt,
-            self.cam_pos[1] + self.velocity[1] * dt,
-            self.cam_pos[2] + self.velocity[2] * dt
-        ]
-        self.resolve_collision_mc(new_pos)
+        # 子步进（增加到8步提高精度）
+        steps = 8
+        sub_dt = dt / steps
+        for _ in range(steps):
+            new_pos = [
+                self.cam_pos[0] + self.velocity[0] * sub_dt,
+                self.cam_pos[1] + self.velocity[1] * sub_dt,
+                self.cam_pos[2] + self.velocity[2] * sub_dt
+            ]
+            self.resolve_collision_mc(new_pos)
 
         if self.keys[b' '] and self.is_on_ground:
             self.velocity[1] = self.jump_speed
@@ -470,7 +515,7 @@ class Flantyle:
     def main(self):
         if not glfw.init():
             raise RuntimeError("glfw init failed")
-        self.window = glfw.create_window(self.win_width, self.win_height, "Flantyle - Chunk System", None, None)
+        self.window = glfw.create_window(self.win_width, self.win_height, "Flantyle Indev 0.3 Version", None, None)
         if not self.window:
             glfw.terminate()
             raise RuntimeError("window creation failed")
@@ -504,7 +549,6 @@ class Flantyle:
 
         self.generate_world(size_in_chunks=8, height_scale=35, seed=42)
 
-        # 强制重建所有区块
         for chunk in self.chunks.values():
             if chunk.dirty:
                 self.rebuild_chunk_vbo(chunk)
