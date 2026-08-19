@@ -102,8 +102,6 @@
 
 * #### **`chunk_block_append(wx, wy, wz, tex_1, tex_2, tex_3, tex_4, tex_5, tex_6)`**：在世界坐标处添加一个方块，自动计算所属区块
 
-* #### **`setblocks_append(x, y, z, face_0, face_1, face_2, face_3, face_4, face_5)`**：添加方块，与 `chunk_block_append` 功能相同
-
 * #### **`remove_block(wx, wy, wz)`**：移除指定世界坐标的方块，返回是否成功
 
 
