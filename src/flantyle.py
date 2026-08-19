@@ -42,7 +42,6 @@ class Flantyle:
         self.center_x = self.win_width // 2
         self.center_y = self.win_height // 2
 
-        # 不再需要 keys 初始化，因为轮询会直接读取 glfw
         self.keys = {b'w':False, b'a':False, b's':False, b'd':False, b' ':False, b'q':False}
         self.window = None
         self._last_cursor_pos = None
@@ -81,6 +80,23 @@ class Flantyle:
         chunk = self.chunks.get((cx, cz))
         return chunk.is_block_at(lx, ly, lz) if chunk else False
 
+    # ================= 核心区块添加方法 =================
+    def chunk_block_append(self, wx, wy, wz, tex_1, tex_2, tex_3, tex_4, tex_5, tex_6):
+        """自动寻址的区块方块添加方法"""
+        tex_names = [tex_1, tex_2, tex_3, tex_4, tex_5, tex_6]
+        tex_ids = []
+        for name in tex_names:
+            tid = self.texture_map.get(name)
+            if tid is None:
+                tid = self.texture_map.get("error")
+            tex_ids.append(tid)
+        cx, cz, lx, ly, lz = self.world_to_local(wx, wy, wz)
+        if not (0 <= lx < self.chunk_size and 0 <= ly < Chunk.WORLD_HEIGHT and 0 <= lz < self.chunk_size):
+            return
+        chunk = self.get_chunk(cx, cz)
+        chunk.set_block(lx, ly, lz, tex_ids)
+        chunk.dirty = True
+
     def add_neighbor_blocks_to_dirty(self, wx, wy, wz):
         dirs = [(0,0,2), (0,0,-2), (-2,0,0), (2,0,0), (0,2,0), (0,-2,0)]
         for dx, dy, dz in dirs:
@@ -107,35 +123,6 @@ class Flantyle:
             self.add_neighbor_blocks_to_dirty(wx, wy, wz)
             return True
         return False
-
-    def generate_world(self, size_in_chunks=8, height_scale=35, seed=42):
-        from opensimplex import OpenSimplex
-        noise = OpenSimplex(seed)
-        total = 0
-        for cx in range(-size_in_chunks//2, size_in_chunks//2):
-            for cz in range(-size_in_chunks//2, size_in_chunks//2):
-                chunk = self.get_chunk(cx, cz)
-                for lx in range(self.chunk_size):
-                    for lz in range(self.chunk_size):
-                        wx = (cx * self.chunk_size + lx) * 2
-                        wz = (cz * self.chunk_size + lz) * 2
-                        y = noise.noise2(wx * 0.05, wz * 0.05)
-                        top_y = int((y + 1) / 2 * height_scale)
-                        if top_y >= Chunk.WORLD_HEIGHT:
-                            top_y = Chunk.WORLD_HEIGHT - 1
-                        for ly in range(top_y, -1, -1):
-                            wy = ly * 2
-                            offset = top_y - ly
-                            if offset == 0:
-                                tex = [self.texture_map["grass"]] * 4 + [self.texture_map["grass_top"], self.texture_map["dirt"]]
-                            elif offset <= 3:
-                                tex = [self.texture_map["dirt"]] * 6
-                            else:
-                                tex = [self.texture_map["stone"]] * 6
-                            chunk.set_block(lx, ly, lz, tex)
-                            total += 1
-                chunk.dirty = True
-        print(f"[{get_log_time()}] Generated {total} blocks")
 
     def rebuild_chunk_vbo(self, chunk):
         for _, (vbo, _) in chunk.vbo_groups.items():
@@ -238,10 +225,9 @@ class Flantyle:
                 self.remove_block(*pos)
 
     def key_callback(self, win, key, scancode, action, mods):
-        # 保留但不再使用，仅用于调试
         pass
 
-    # ========== 物理与碰撞（最简回退 + 轮询按键） ==========
+    # ========== 物理与碰撞 ==========
     def get_player_aabb(self, pos):
         hw = self.player_width / 2
         return ((pos[0]-hw, pos[1], pos[2]-hw), (pos[0]+hw, pos[1]+self.player_height, pos[2]+hw))
@@ -311,14 +297,12 @@ class Flantyle:
                 self.cam_pos[1] += 0.01
 
     def physics_update(self, dt):
-        # ----- 轮询按键 -----
+        # 轮询按键
         self.keys[b'w'] = glfw.get_key(self.window, glfw.KEY_W) == glfw.PRESS
         self.keys[b'a'] = glfw.get_key(self.window, glfw.KEY_A) == glfw.PRESS
         self.keys[b's'] = glfw.get_key(self.window, glfw.KEY_S) == glfw.PRESS
         self.keys[b'd'] = glfw.get_key(self.window, glfw.KEY_D) == glfw.PRESS
         self.keys[b' '] = glfw.get_key(self.window, glfw.KEY_SPACE) == glfw.PRESS
-        # 其他按键如 Shift 可同样处理
-        # --------------------
 
         if dt > 0.02:
             dt = 0.02
@@ -498,7 +482,7 @@ class Flantyle:
         glfw.swap_interval(1)
 
         glfw.set_cursor_pos_callback(self.window, self.mouse_motion_callback)
-        glfw.set_key_callback(self.window, self.key_callback)   # 保留但不再使用
+        glfw.set_key_callback(self.window, self.key_callback)
         glfw.set_mouse_button_callback(self.window, self.mouse_button_callback)
         glfw.set_framebuffer_size_callback(self.window, self.reshape_callback)
 
@@ -510,6 +494,7 @@ class Flantyle:
         glClearColor(86/255.0, 151/255.0, 223/255.0, 1.0)
         glEnable(GL_DEPTH_TEST)
 
+        # 加载纹理
         try:
             for tex_name, filename in TEXTURE_NAME_MAP.items():
                 if filename in texture_registry:
@@ -522,8 +507,11 @@ class Flantyle:
             print(f"[{get_log_time()}] [Error]: {e}")
             self.texture_map = {}
 
-        self.generate_world(size_in_chunks=8, height_scale=35, seed=42)
+        # ===== 地形生成 =====
+        import world_generator
+        world_generator.generate_world(self, size_in_chunks=12, height_scale=25, seed=42)
 
+        # 强制重建所有区块的 VBO
         for chunk in self.chunks.values():
             if chunk.dirty:
                 self.rebuild_chunk_vbo(chunk)

@@ -10,12 +10,7 @@ Flantyle 是一个使用 Python、C++ 编写的3D沙盒游戏。
     
         pip install PyOpenGL PyOpenGL_accelerate Pillow numpy glfw opensimplex
     
-2.  **编译 C++ 动态库（Windows 下使用 MinGW）：**
-
-        cd src
-        g++ -shared -O2 -std=c++11 -o world_generator.dll world_generator_c.cpp
-    
-3.  **启动程序（无需 `--run` 参数）：**
+2.  **启动程序（无需 `--run` 参数）：**
     
         python flantyle.py
     
@@ -24,33 +19,12 @@ Flantyle 是一个使用 Python、C++ 编写的3D沙盒游戏。
 ------
 
 *   **`flantyle.py`** — 引擎核心：窗口、渲染、事件循环。
-*   **`world_generator.py`** — 地形生成调度，优先调用 C++ DLL，失败时回退 Python。
-*   **`world_generator_c.cpp`** — C++ 噪声实现源文件，编译生成 `world_generator.dll`。
-*   **`world_generator.dll`** — 编译后生成的动态库，需放在 `flantyle.py` 同级目录。
+*   **`world_generator.py`** — 地形生成调度.
 *   **`textures.py`** — 纹理加载与名称映射。
 *   **`log_time.py`** — 统一日志时间戳。
 *   **`resources/textures/`** — 纹理图片（PNG）存放目录。
 
-C++ 导出接口
---------
-
-导出的核心函数：
-
-    extern "C" void world_generator_c(float* data, int size, float scale, int height, int seed);
-
-**参数：**
-
-*   `data`：输出数组（由 Python 分配，长度为 `size * size`）
-*   `size`：世界边长（方块数）
-*   `scale`：噪声缩放（推荐 0.05）
-*   `height`：地形最大高度
-*   `seed`：随机种子（整数）
-
-扩展与修改
------
-
-*   **修改噪声算法**：编辑 `world_generator_c.cpp`，重写噪声函数，重新编译 DLL。
-*   **新增地形生成逻辑**：在 `world_generator.py` 中新增函数，使用 `block_adder` 回调。
+*   **新增地形生成逻辑**：在 `world_generator.py` 中新增函数。
 *   **新增纹理**：在 `resources/textures/` 添加 PNG，并在 `textures.py` 的 `TEXTURE_NAME_MAP` 注册。
 
 开发提示
